@@ -1,0 +1,152 @@
+# stuffs
+import yt
+#import astropy.io.fits as pyfits
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# rebin factor
+#rebin_shape = (512, 512, 512)
+rebin_shape = np.array([4,4,4]) # factors of origional
+#rebin_shape = np.array([16,16,16]) # factors of origional
+
+# height of cube? (w/rt original image)
+cube_height = 128
+
+# image of sun in xrays in 1024x1024 (full disk)
+# intensity = the z
+ffile = '/Users/jillnaiman1/Dropbox/tactileSun/comp_XRT20161006_061228.4.fits'
+
+fileout = '/Users/jillnaiman1/Dropbox/tactileSun/sunout'
+
+
+# plot the surface?
+plot_surf = False
+
+
+
+def bin_ndarray(ndarray, new_shape, operation='sum'):
+    """
+    Bins an ndarray in all axes based on the target shape, by summing or
+        averaging.
+
+    Number of output dimensions must match number of input dimensions and 
+        new axes must divide old ones.
+
+    Example
+    -------
+    >>> m = np.arange(0,100,1).reshape((10,10))
+    >>> n = bin_ndarray(m, new_shape=(5,5), operation='sum')
+    >>> print(n)
+
+    [[ 22  30  38  46  54]
+     [102 110 118 126 134]
+     [182 190 198 206 214]
+     [262 270 278 286 294]
+     [342 350 358 366 374]]
+
+    """
+    operation = operation.lower()
+    if not operation in ['sum', 'mean']:
+        raise ValueError("Operation not supported.")
+    if ndarray.ndim != len(new_shape):
+        raise ValueError("Shape mismatch: {} -> {}".format(ndarray.shape,
+                                                           new_shape))
+    compression_pairs = [(d, c//d) for d,c in zip(new_shape,
+                                                  ndarray.shape)]
+    flattened = [l for p in compression_pairs for l in p]
+    ndarray = ndarray.reshape(flattened)
+    for i in range(len(new_shape)):
+        op = getattr(ndarray, operation)
+        ndarray = op(-1*(i+1))
+    return ndarray
+
+
+
+ds = yt.load(ffile)
+
+#f = pyfits.open(ffile)
+
+dd = ds.all_data()
+
+intensity = dd[('fits', 'image_0')]
+
+intensity[intensity < 0] = 0.0
+
+intensity = np.log10(intensity)
+intensity[np.isnan(intensity)] = 0.0
+intensity[np.isneginf(intensity)] = 0.0
+
+x = (dd[('fits', 'x')].v).astype('int')
+y = (dd[('fits', 'y')].v).astype('int')
+
+intensity_xy = np.zeros([x.max(),y.max()])
+
+for c in xrange(len(x)):
+    intensity_xy[x[c]-1,y[c]-1] = intensity[c]
+
+# regrid
+rebin_shape[0] = (x.max()/rebin_shape[0])
+rebin_shape[1] = (y.max()/rebin_shape[1])
+rebin_shape[2] = (cube_height*1.0/rebin_shape[2])
+
+intensity_xy = bin_ndarray(intensity_xy, (rebin_shape[0],rebin_shape[1]), operation='mean')
+
+intensity_xy = ( (intensity_xy-intensity_xy.min())/intensity_xy.ptp()*rebin_shape[2] ).astype('int')
+
+#intensity_xy[:,:] = 10 # test cube
+
+# little boarder
+lb = 1
+
+grid = np.ones([ rebin_shape[0]+2*lb,rebin_shape[1]+2*lb,rebin_shape[2]+2*lb ])
+
+
+for i in xrange(rebin_shape[0]):
+    for j in xrange(rebin_shape[1]):
+        grid[i+lb,j+lb,lb:intensity_xy[i,j]-1+lb] = 0.0
+
+        
+
+from skimage import measure # pip install scikit-image
+
+verts, faces = measure. marching_cubes(grid, 0.0)#, spacing=(1.0,1.0,1.0))
+
+if plot_surf:
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_trisurf(verts[:, 0], verts[:,1], faces, verts[:, 2],
+                    cmap='Reds', lw=1)
+    plt.show()
+
+
+import matplotlib.cm as cm
+cmap = cm.get_cmap('Reds') # red color map, default 0->1
+
+# turn intensity into color too
+#color_inds = 
+
+
+
+# do we need vt and vn?
+y = []
+
+# first, write a little intro for each planet
+y.append('#\n')
+y.append('# object Sun' + '\n')
+y.append('#\n')
+
+# now, output a copy of the file
+# now loop and resize and then replace verticies
+for i in range(0, len(verts)):
+    y.append('v ' + str(verts[i,0]) + ' ' + str(verts[i,1]) + ' ' + str(verts[i,2]) + '\n')
+
+for i in xrange(len(faces)):
+    y.append('f ' + str(faces[i,0]+1) + ' ' + str(faces[i,1]+1) + ' ' + str(faces[i,2]+1) + '\n')
+
+import os
+f = open(fileout+'.obj', 'w')
+for i in range(0,len(y)):
+    f.write(y[i].replace('\r\n', os.linesep))
+
+f.close()
