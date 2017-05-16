@@ -1,0 +1,6 @@
+import yt  # this assumes yt is installed, but really, we only use it as a fits reader, so it can be replaced with pyfits or somesuch
+import numpy as np
+import matplotlib.pyplot as plt
+from utils import bin_ndarray
+
+
